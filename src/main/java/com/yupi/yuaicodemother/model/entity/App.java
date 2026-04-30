@@ -19,7 +19,7 @@ import lombok.NoArgsConstructor;
 /**
  * 应用 实体类。
  *
- * @author <a href="https://github.com/liyupi">程序员鱼皮</a>
+ * @author <a >Klong</a>
  */
 @Data
 @Builder
@@ -100,6 +100,12 @@ public class App implements Serializable {
      */
     @Column("updateTime")
     private LocalDateTime updateTime;
+
+    /**
+     * 需求摘要（当前网站状态描述，由 AI 生成）
+     */
+    @Column("requirementSummary")
+    private String requirementSummary;
 
     /**
      * 是否删除

@@ -379,6 +379,22 @@ const sendMessage = async () => {
 const generateCode = async (userMessage: string, aiMessageIndex: number) => {
   let eventSource: EventSource | null = null
   let streamCompleted = false
+  // 最长等待 8 分钟，防止工具调用耗时过长导致页面卡住
+  let generationTimer: ReturnType<typeof setTimeout> | null = null
+
+  const cleanup = (isComplete: boolean) => {
+    if (streamCompleted) return
+    streamCompleted = true
+    isGenerating.value = false
+    if (generationTimer) clearTimeout(generationTimer)
+    eventSource?.close()
+    if (isComplete) {
+      setTimeout(async () => {
+        await fetchAppInfo()
+        updatePreview()
+      }, 1000)
+    }
+  }
 
   try {
     // 获取 axios 配置的 baseURL
@@ -399,6 +415,18 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
 
     let fullContent = ''
 
+    // 超时保护：8 分钟后若仍未完成，自动关闭并重置状态
+    generationTimer = setTimeout(() => {
+      if (!streamCompleted) {
+        console.warn('生成超时（8分钟），自动结束')
+        messages.value[aiMessageIndex].content =
+          fullContent || '抱歉，生成时间过长，请重试。'
+        messages.value[aiMessageIndex].loading = false
+        message.warning('生成超时，请尝试缩短需求描述后重试')
+        cleanup(false)
+      }
+    }, 8 * 60 * 1000)
+
     // 处理接收到的消息
     eventSource.onmessage = function (event) {
       if (streamCompleted) return
@@ -418,44 +446,30 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
       } catch (error) {
         console.error('解析消息失败:', error)
         handleError(error, aiMessageIndex)
+        cleanup(false)
       }
     }
 
     // 处理done事件
     eventSource.addEventListener('done', function () {
-      if (streamCompleted) return
-
-      streamCompleted = true
-      isGenerating.value = false
-      eventSource?.close()
-
-      // 延迟更新预览，确保后端已完成处理
-      setTimeout(async () => {
-        await fetchAppInfo()
-        updatePreview()
-      }, 1000)
+      cleanup(true)
     })
 
     // 处理错误
     eventSource.onerror = function () {
       if (streamCompleted || !isGenerating.value) return
-      // 检查是否是正常的连接关闭
+      // readyState === CONNECTING 说明 EventSource 在尝试重连，视为正常结束
       if (eventSource?.readyState === EventSource.CONNECTING) {
-        streamCompleted = true
-        isGenerating.value = false
-        eventSource?.close()
-
-        setTimeout(async () => {
-          await fetchAppInfo()
-          updatePreview()
-        }, 1000)
+        cleanup(true)
       } else {
         handleError(new Error('SSE连接错误'), aiMessageIndex)
+        cleanup(false)
       }
     }
   } catch (error) {
     console.error('创建 EventSource 失败：', error)
     handleError(error, aiMessageIndex)
+    cleanup(false)
   }
 }
 

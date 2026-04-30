@@ -9,9 +9,9 @@ spring:
   # mysql
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/yu_ai_code_mother
-    username: root
-    password: 123456
+    url: jdbc:mysql://localhost:3306/notcode
+    username: ${DB_USERNAME:}
+    password: ${DB_PASSWORD:}
   # redis
   data:
     redis:
@@ -45,17 +45,26 @@ langchain4j:
   open-ai:
     chat-model:
       base-url: https://api.deepseek.com
-      api-key: <Your API Key>
+      api-key: ${DEEPSEEK_API_KEY:}
       model-name: deepseek-chat
       strict-json-schema: true
       response-format: json_object
       max-tokens: 8192
+      timeout: 300s
       log-requests: true
       log-responses: true
     streaming-chat-model:
       base-url: https://api.deepseek.com
-      api-key: <Your API Key>
+      api-key: ${DEEPSEEK_API_KEY:}
       model-name: deepseek-chat
       max-tokens: 8192
+      timeout: 300s
       log-requests: true
       log-responses: true
+# Pexels 图片搜索 API（免费注册：https://www.pexels.com/api/）
+pexels:
+  api-key: ${PEXELS_API_KEY:}
+# Firecrawl 网页抓取 API（https://www.firecrawl.dev/）
+firecrawl:
+  api-key: ${FIRECRAWL_API_KEY:}
+  base-url: https://api.firecrawl.dev/v1

@@ -9,8 +9,7 @@ import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.AiCodeGeneratorFacade;
-import com.yupi.yuaicodemother.core.parser.CodeParserExecutor;
-import com.yupi.yuaicodemother.core.saver.CodeFileSaverExecutor;
+import com.yupi.yuaicodemother.event.MemoryUpdateEvent;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
@@ -18,15 +17,16 @@ import com.yupi.yuaicodemother.model.dto.app.AppQueryRequest;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.mapper.AppMapper;
 import com.yupi.yuaicodemother.model.entity.User;
-import com.yupi.yuaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.yupi.yuaicodemother.model.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.model.vo.AppVO;
 import com.yupi.yuaicodemother.model.vo.UserVO;
+import com.yupi.yuaicodemother.service.AppMemoryService;
 import com.yupi.yuaicodemother.service.AppService;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
 import com.yupi.yuaicodemother.service.UserService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -42,7 +42,7 @@ import java.util.stream.Collectors;
 /**
  * 应用 服务层实现。
  *
- * @author <a href="https://github.com/liyupi">程序员鱼皮</a>
+ * @author <a >Klong</a>
  */
 @Service
 @Slf4j
@@ -56,6 +56,12 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Resource
     private ChatHistoryService chatHistoryService;
+
+    @Resource
+    private AppMemoryService appMemoryService;
+
+    @Resource
+    private ApplicationEventPublisher eventPublisher;
 
     @Override
     public Flux<String> chatToGenCode(Long appId, String message, User loginUser) {
@@ -75,24 +81,39 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用代码生成类型错误");
         }
-        // 5. 在调用 AI 前，先保存用户消息到数据库中
-        chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
-        // 6. 调用 AI 生成代码（流式）
-        Flux<String> contentFlux = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
-        // 7. 收集 AI 响应的内容，并且在完成后保存记录到对话历史
+        // 5. 读取 L1 温数据摘要（编码偏好 + 架构约定），注入 System Prompt
+        String requirementSummary = appMemoryService.getRequirementSummary(appId);
+        // 6. 调用 AI 生成代码（流式），warmMemory 与 requirementSummary 共用同一字段
+        Flux<String> contentFlux = aiCodeGeneratorFacade.generateAndSaveCodeStream(
+                message, codeGenTypeEnum, appId, loginUser.getId(), requirementSummary, requirementSummary);
+        // 7. 收集 AI 响应，完成后解析摘要并保存对话记录
         StringBuilder aiResponseBuilder = new StringBuilder();
         return contentFlux.map(chunk -> {
-            // 实时收集 AI 响应的内容
             aiResponseBuilder.append(chunk);
             return chunk;
         }).doOnComplete(() -> {
-            // 流式返回完成后，保存 AI 消息到对话历史中
             String aiResponse = aiResponseBuilder.toString();
-            chatHistoryService.addChatMessage(appId, aiResponse, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
+            // 7a. 从响应末尾解析 <!--SUMMARY:xxx--> 标记（AI 顺带输出，零额外成本）
+            String aiSummary = "";
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("<!--SUMMARY:(.+?)-->")
+                    .matcher(aiResponse);
+            if (matcher.find()) {
+                aiSummary = matcher.group(1).trim();
+                // 从保存的响应中去掉 SUMMARY 标记，保持 DB 内容干净
+                aiResponse = aiResponse.replace(matcher.group(0), "").stripTrailing();
+            }
+            // 7b. 保存一条完整的对话记录（L2）
+            Long chatHistoryId = chatHistoryService.saveChatHistory(
+                    appId, loginUser.getId(), message, aiResponse, aiSummary);
+            // 7c. 发布记忆更新事件，触发 L0 追加和 L1 定期更新
+            eventPublisher.publishEvent(new MemoryUpdateEvent(
+                    this, appId, loginUser.getId(), message, chatHistoryId));
         }).doOnError(error -> {
-            // 如果 AI 回复失败，也需要保存记录到数据库中
-            String errorMessage = "AI 回复失败：" + error.getMessage();
-            chatHistoryService.addChatMessage(appId, errorMessage, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
+            log.error("AI 代码生成失败，appId={}: {}", appId, error.getMessage());
+            // 出错时也保存一条失败记录，供历史查看
+            chatHistoryService.saveChatHistory(
+                    appId, loginUser.getId(), message, "AI 生成失败：" + error.getMessage(), "生成失败");
         });
     }
 
@@ -138,7 +159,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         boolean updateResult = this.updateById(updateApp);
         ThrowUtils.throwIf(!updateResult, ErrorCode.OPERATION_ERROR, "更新应用部署信息失败");
         // 9. 返回可访问的 URL 地址
-        return String.format("%s/%s", AppConstant.CODE_DEPLOY_HOST, deployKey);
+        return String.format("%s/deploy/%s/", AppConstant.CODE_DEPLOY_HOST, deployKey);
     }
 
     @Override

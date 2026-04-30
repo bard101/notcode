@@ -1,5 +1,6 @@
 ### CUSTOM ###
 application-local.yml
+dump.rdb
 tmp
 
 HELP.md

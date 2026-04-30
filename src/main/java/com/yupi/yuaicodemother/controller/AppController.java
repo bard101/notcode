@@ -29,6 +29,7 @@ import com.yupi.yuaicodemother.service.AppService;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +37,7 @@ import java.util.Map;
 /**
  * 应用 控制层。
  *
- * @author <a href="https://github.com/liyupi">程序员鱼皮</a>
+ * @author <a >Klong</a>
  */
 @RestController
 @RequestMapping("/app")
@@ -59,7 +60,13 @@ public class AppController {
         User loginUser = userService.getLoginUser(request);
         // 调用服务生成代码（SSE 流式返回）
         Flux<String> contentFlux = appService.chatToGenCode(appId, message, loginUser);
-        return contentFlux
+
+        // ---- 防止长时工具调用（如 Firecrawl 抓页）期间连接超时 ----
+        // 对 contentFlux 进行多播，避免重复触发 LLM 调用
+        Flux<String> sharedContent = contentFlux.publish().refCount(2);
+
+        // 数据流：每个 chunk 包成 SSE，末尾追加 done 事件
+        Flux<ServerSentEvent<String>> dataEvents = sharedContent
                 .map(chunk -> {
                     Map<String, String> wrapper = Map.of("d", chunk);
                     String jsonData = JSONUtil.toJsonStr(wrapper);
@@ -68,12 +75,20 @@ public class AppController {
                             .build();
                 })
                 .concatWith(Mono.just(
-                        // 发送结束事件
                         ServerSentEvent.<String>builder()
                                 .event("done")
                                 .data("")
                                 .build()
                 ));
+
+        // 心跳流：每 20 秒发一条 SSE 注释（不触发 onmessage），内容流结束后自动停止
+        Flux<ServerSentEvent<String>> heartbeat = Flux.interval(Duration.ofSeconds(20))
+                .map(i -> ServerSentEvent.<String>builder()
+                        .comment("keepalive")
+                        .build())
+                .takeUntilOther(sharedContent.then());
+
+        return dataEvents.mergeWith(heartbeat);
     }
 
     /**

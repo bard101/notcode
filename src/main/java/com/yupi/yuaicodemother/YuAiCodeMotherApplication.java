@@ -4,8 +4,9 @@ import dev.langchain4j.community.store.embedding.redis.spring.RedisEmbeddingStor
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.batch.BatchAutoConfiguration;
 
-@SpringBootApplication(exclude = {RedisEmbeddingStoreAutoConfiguration.class})
+@SpringBootApplication(exclude = {RedisEmbeddingStoreAutoConfiguration.class, BatchAutoConfiguration.class})
 @MapperScan("com.yupi.yuaicodemother.mapper")
 public class YuAiCodeMotherApplication {
 

@@ -18,7 +18,7 @@ import lombok.NoArgsConstructor;
 /**
  * 对话历史 实体类。
  *
- * @author <a href="https://github.com/liyupi">程序员鱼皮</a>
+ * @author <a >Klong</a>
  */
 @Data
 @Builder
@@ -37,15 +37,20 @@ public class ChatHistory implements Serializable {
     private Long id;
 
     /**
-     * 消息
+     * 用户提问原文（L0 索引 title 字段来源）
+     */
+    private String title;
+
+    /**
+     * 完整一轮对话内容（用户提问 + AI 回复代码）
      */
     private String message;
 
     /**
-     * user/ai
+     * AI 回复一句话摘要（≤50字，供 L1 温数据更新使用，避免传大量代码给摘要 AI）
      */
-    @Column("messageType")
-    private String messageType;
+    @Column("ai_summary")
+    private String aiSummary;
 
     /**
      * 应用id

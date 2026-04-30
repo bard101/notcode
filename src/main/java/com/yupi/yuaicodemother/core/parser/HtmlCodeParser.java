@@ -19,11 +19,10 @@ public class HtmlCodeParser implements CodeParser<HtmlCodeResult> {
         HtmlCodeResult result = new HtmlCodeResult();
         // 提取 HTML 代码
         String htmlCode = extractHtmlCode(codeContent);
+        // 只有成功提取到代码块时才设置，避免将 AI 的文本描述误存为 HTML
+        // 工具调用场景下 AI 不输出代码块，此时 htmlCode 为 null，文件保存器会跳过写入
         if (htmlCode != null && !htmlCode.trim().isEmpty()) {
             result.setHtmlCode(htmlCode.trim());
-        } else {
-            // 如果没有找到代码块，将整个内容作为HTML
-            result.setHtmlCode(codeContent.trim());
         }
         return result;
     }

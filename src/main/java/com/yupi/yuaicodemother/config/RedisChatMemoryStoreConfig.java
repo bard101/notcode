@@ -1,6 +1,7 @@
 package com.yupi.yuaicodemother.config;
 
 import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
+
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
