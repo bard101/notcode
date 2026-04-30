@@ -1,6 +1,6 @@
 spring:
   application:
-    name: yu-ai-code-mother-backend
+    name: notcode-backend
   # session 配置
   session:
     store-type: redis
